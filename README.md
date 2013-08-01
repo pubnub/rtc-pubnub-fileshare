@@ -17,3 +17,4 @@ The demo can be run from your local filesystem or from an actual web server. But
 Browser Support
 ---------------
 Currently only browsers which support WebRTC (Chrome stable and Firefox Beta as of 6-14-2013)
+
