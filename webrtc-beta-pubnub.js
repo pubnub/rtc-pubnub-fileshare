@@ -1,3 +1,5 @@
+/*! webrtc-beta-pubnub - v0.6.0 - 2013-09-17
+* Copyright (c) 2013 ; Licensed  */
 (function (window, PUBNUB) {
   //"use strict";
 
@@ -31,18 +33,18 @@
   }
 
   // Grabs an attribute from a node.
-  function attr( node, attribute, value ) {
-      if (value) {
-        node.setAttribute( attribute, value );
-      }
-      else {
-        return node && node.getAttribute && node.getAttribute(attribute);
-      }
+  function attr(node, attribute, value) {
+    if (value) {
+      node.setAttribute(attribute, value);
+    }
+    else {
+      return node && node.getAttribute && node.getAttribute(attribute);
+    }
   }
 
   // Extend function for adding to existing objects
   function extend(obj, other) {
-    for(var key in other) {
+    for (var key in other) {
       obj[key] = other[key];
     }
     return obj;
@@ -51,13 +53,14 @@
   // Putting UUID function here to work around non-exposed ID issues.
   function generateUUID() {
     var u = 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g,
-    function(c) {
-        var r = Math.random()*16|0, v = c === 'x' ? r : (r&0x3|0x8);
-        return v.toString(16);
+    function (c) {
+      var r = Math.random() * 16 | 0, v = c === 'x' ? r : (r & 0x3 | 0x8);
+      return v.toString(16);
     });
     return u;
   }
 
+  // Hack for Chrome to allow adequate throughput over DataChannel
   function transformOutgoingSdp(sdp) {
     var splitted = sdp.split("b=AS:30");
     if (splitted.length === 1) {
@@ -97,24 +100,44 @@
     // SignalingChannel
     // The signaling channel handles sending data to and from a specific user channel.
     function SignalingChannel(pubnub, selfUuid, otherUuid) {
+      var queue = [];
+      this.peerReady = false;
       this.selfUuid = selfUuid;
       this.otherUuid = otherUuid;
+
       // The send function is here so we do not count a reference to PubNub preventing its destruction.
-      this.send = function (message) {
+      this.send = function (message, force) {
+        var strMsg = message;
         message.uuid = selfUuid;
         message = JSON.stringify(message);
-        debug("Sending", message, otherUuid);
-        pubnub.publish({
-          channel: PREFIX + otherUuid,
-          message: message
-        });
+
+        if (this.peerReady === true || force === true) {
+          if (message.sdp) {
+          }
+          pubnub.publish({
+            channel: PREFIX + otherUuid,
+            message: message
+          });
+        } else {
+          queue.push(strMsg);
+        }
+      };
+      this.initiate = function () {
+        this.send({ initiation: true }, true);
+      };
+      this.peerIsReady = function () {
+        this.peerReady = true;
+        queue.unshift({ negotiationReady: true });
+        queue.forEach(function (msg) {
+          this.send(msg);
+        }.bind(this));
+        queue = [];
       };
     }
 
     function personalChannelCallback(message) {
       message = JSON.parse(message);
-      debug("Got message", message);
-      
+
       if (message.uuid != null) {
         if (message.uuid === UUID) {
           return;
@@ -122,23 +145,32 @@
 
         var connected = PEER_CONNECTIONS[message.uuid] != null;
 
-        //// Setup the connection if we do not have one already.
+        // Setup the connection if we do not have one already.
         if (connected === false) {
           PUBNUB.createP2PConnection(message.uuid, false);
         }
 
         var connection = PEER_CONNECTIONS[message.uuid];
 
+        if (!connection.signalingChannel.peerReady) {
+          connection.signalingChannel.peerIsReady();
+        }
+
         if (message.sdp != null) {
+          debug("Remote Session Description:", message.sdp);
           connection.connection.setRemoteDescription(new RTCSessionDescription(message.sdp), function () {
             // Add ice candidates we might have gotten early.
-            for (var i = 0; i < connection.candidates; i++) {
-              connection.connection.addIceCandidate(new RTCIceCandidate(connection.candidates[i]));
-              connection.candidates = [];
+            var candidates = connection.candidates;
+            debug("Adding ice candidates", candidates, connection);
+            for (var i = 0; i < candidates.length; i++) {
+              debug("Remote ICE Candidate (backfill):", candidates[i]);
+              connection.connection.addIceCandidate(new RTCIceCandidate(candidates[i]));
+              connection.connection.candidates = [];
             }
-            
+
             // If we did not create the offer then create the answer.
             if (connection.connection.signalingState === 'have-remote-offer') {
+              debug("Creating answer...", message.uuid);
               connection.connection.createAnswer(function (description) {
                 PUBNUB.gotDescription(description, connection);
               }, function (err) {
@@ -152,9 +184,10 @@
             error("Error setting remote description: ", err);
           });
         } else if (message.initiation === true) {
-          PUBNUB.createP2PConnection(message.uuid, true);
-        } else {
-          if (connection.connection.remoteDescription != null && connection.connection.iceConnectionState !== "connected") {
+          //PUBNUB.createP2PConnection(message.uuid, true);
+        } else if (message.candidate) {
+          if (connection.connection.remoteDescription != null) {// && connection.connection.iceConnectionState !== "connected") {
+            debug("Remote ICE Candidate:", message.candidate);
             connection.connection.addIceCandidate(new RTCIceCandidate(message.candidate));
           }
           else {
@@ -168,7 +201,8 @@
     // Subscribe to our own personal channel to listen for data.
     PUBNUB.subscribe({
       channel: PREFIX + uuid,
-      timetoken: 10000,
+      restore: false,
+      //timetoken: backfillTime * Math.pow(10, 7),
       connect: function () {
         CONNECTED = true;
 
@@ -177,12 +211,12 @@
 
           if (args.length > 1) {
             // We need to send a description because we are the "host"
+            args[1].signalingChannel.initiate();
+            debug("Connection Queue Description", args);
             PUBNUB.gotDescription.apply(PUBNUB, args);
           } else if (args.length === 1) {
             // We are not the "host" so we send initiation
-            args[0].signalingChannel.send({
-              initiation: true
-            });
+            args[0].signalingChannel.initiate();
           }
         }
 
@@ -201,7 +235,14 @@
         description.sdp = transformOutgoingSdp(description.sdp);
       }
 
-      connection.connection.setLocalDescription(description);
+      if (connection.connection.signalingState !== 'have-local-offer') {
+        debug("Local Session Description", description.sdp);
+        connection.connection.setLocalDescription(description, function () {
+
+        }, function (error) {
+          debug("Error setting local description: ", error);
+        });
+      }
 
       if (CONNECTED === false) {
         CONNECTION_QUEUE.push([description, connection]);
@@ -264,7 +305,12 @@
           }
         };
 
+        pc.onsignalingstatechange = function () {
+          debug("Signaling state change: ", pc.signalingState);
+        };
+
         pc.oniceconnectionstatechange = function () {
+          debug("Connection state change: ", pc.iceConnectionState);
           if (pc.iceConnectionState === "connected") {
             // Nothing for now
           }
@@ -281,12 +327,14 @@
           signalingChannel: signalingChannel
         };
 
+        // Compare UUIDs to guarantee we determine the 'leader' for negotiating the connection
         if (UUID > uuid) {
           var dc = pc.createDataChannel("pubnub", (IS_CHROME ? { reliable: false } : {}));
           onDataChannelCreated({
             channel: dc
           });
 
+          debug("Creating offer...", uuid);
           pc.createOffer(function (description) {
             self.gotDescription(description, PEER_CONNECTIONS[uuid]);
           }, function (err) {
@@ -298,9 +346,7 @@
           if (CONNECTED === false) {
             CONNECTION_QUEUE.push([PEER_CONNECTIONS[uuid]]);
           } else {
-            signalingChannel.send({
-              initiation: true
-            });
+            signalingChannel.initiate();
           }
         }
       } else {
@@ -358,13 +404,11 @@
               type: PUBLISH_TYPE.STREAM,
               stream: options.stream
             });
-            //PEER_CONNECTIONS[options.user].connection.addStream(options.stream);
           } else if (options.message != null) {
             PUBLISH_QUEUE[options.user].push({
               type: PUBLISH_TYPE.MESSAGE,
               message: options.message
             });
-            //PEER_CONNECTIONS[options.user].dataChannel.send(options.message);
           } else {
             error("Stream or message key not found in argument object. One or the other must be provided for RTC publish calls!");
           }
@@ -402,7 +446,7 @@
           }
 
           // Replay the backfilled messages if they exist
-          debug("Subscribing!", connection.history);
+          debug("Subscribing to user: ", options.user, connection.history);
           if (connection.history.length > 0) {
             for (var i = 0; i < connection.history.length; i++) {
               var message = connection.history[i];
@@ -466,7 +510,11 @@
     // Returns the current peer connection if one exists
     API['peerConnection'] = function (uuid, callback) {
       if (callback) {
-        callback(PEER_CONNECTIONS[uuid].connection);
+        if (PEER_CONNECTIONS[uuid] != null) {
+          callback(PEER_CONNECTIONS[uuid].connection);
+        } else {
+          callback(null);
+        }
       } else {
         debug("PUBNUB.peerConnection should be called with a callback");
       }
@@ -476,7 +524,11 @@
     // Returns the current data channel if one exists
     API['dataChannel'] = function (uuid, callback) {
       if (callback) {
-        callback(PEER_CONNECTIONS[uuid].dataChannel);
+        if (PEER_CONNECTIONS[uuid] != null) {
+          callback(PEER_CONNECTIONS[uuid].dataChannel);
+        } else {
+          callback(null);
+        }
       } else {
         debug("PUBNUB.dataChannel should be called with a callback");
       }
@@ -505,7 +557,7 @@
       options.uuid = uuid;
 
       // Create pubnub object
-      debug(options);
+      debug("PubNub init: ", options);
       var pubnub = _super.call(this, options);
 
       // Extend the WebRTC API
