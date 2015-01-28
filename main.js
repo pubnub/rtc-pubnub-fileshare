@@ -24,8 +24,10 @@
             localLogin: function (name) {
                 this.uuid = name;
                 pubnub = PUBNUB.init({
-                    publish_key: 'pub-c-b2d901ee-2a0f-4d89-8cd3-63039aa6dd90',
-                    subscribe_key: 'sub-c-c74c7cd8-cc8b-11e2-a2ac-02ee2ddab7fe',
+                    publish_key: 'demo',
+                    subscribe_key: 'demo',
+                    // publish_key: 'pub-c-b2d901ee-2a0f-4d89-8cd3-63039aa6dd90',
+                    // subscribe_key: 'sub-c-c74c7cd8-cc8b-11e2-a2ac-02ee2ddab7fe',
                     uuid: this.uuid
                 });
 
@@ -69,8 +71,8 @@
                     self.uuid = res.feed.author[0].email["$t"].toLowerCase();
                     $(".my-email").html(self.uuid);
                     pubnub = PUBNUB.init({
-                        publish_key: 'pub-c-b2d901ee-2a0f-4d89-8cd3-63039aa6dd90',
-                        subscribe_key: 'sub-c-c74c7cd8-cc8b-11e2-a2ac-02ee2ddab7fe',
+                        publish_key: 'pub-c-36b57bdc-2fbf-4c44-a88a-9fba0b917b91',
+                        subscribe_key: 'sub-c-fe375ae0-8c8a-11e4-95ed-02ee2ddab7fe',
                         uuid: self.uuid
                     });
 
