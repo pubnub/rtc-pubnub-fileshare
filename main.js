@@ -24,10 +24,10 @@
             localLogin: function (name) {
                 this.uuid = name;
                 pubnub = PUBNUB.init({
-                    publish_key: 'demo',
-                    subscribe_key: 'demo',
-                    // publish_key: 'pub-c-b2d901ee-2a0f-4d89-8cd3-63039aa6dd90',
-                    // subscribe_key: 'sub-c-c74c7cd8-cc8b-11e2-a2ac-02ee2ddab7fe',
+                    // publish_key: 'demo',
+                    // subscribe_key: 'demo',
+                    publish_key: 'pub-c-7867b3f9-ec87-4f1a-90fc-90a873d6b524',
+                    subscribe_key: 'sub-c-5a4159b4-a660-11e4-8068-0693d8625082',
                     uuid: this.uuid
                 });
 
